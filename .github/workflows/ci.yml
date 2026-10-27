@@ -1,0 +1,150 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  secrets:
+    uses: ./.github/workflows/secrets.yml
+
+  lint:
+    name: Lint (PHPCS + PHP 7.4 compat)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Set up PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          coverage: none
+          tools: composer:v2
+      - name: Install dependencies
+        run: composer install --no-interaction --prefer-dist
+      - name: Run PHPCS
+        run: composer lint
+
+  test:
+    name: Unit (PHP ${{ matrix.php }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # Proves the declared floor (Requires PHP: 7.4) through the current line.
+        php: ['7.4', '8.0', '8.1', '8.2', '8.3']
+    steps:
+      - uses: actions/checkout@v7
+      - name: Set up PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ matrix.php }}
+          coverage: none
+          tools: composer:v2
+      - name: Install dependencies
+        # No committed lock, so this resolves against each cell's PHP — composer
+        # picks 7.4-compatible dev-tool versions on the low cells automatically.
+        run: composer install --no-interaction --prefer-dist
+      - name: Run PHPUnit
+        run: composer test
+
+  integration:
+    name: Integration (WP ${{ matrix.wp }}, ${{ matrix.antagonist }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # latest + a recent prior. Bump alongside readme.txt "Tested up to".
+        wp: ['7.0', '6.8']
+        # 'default' = Wordfence + WP Super Cache (from .wp-env.json); 'w3tc' swaps
+        # the page cache to W3 Total Cache so cache effects stay attributable.
+        antagonist: ['default', 'w3tc']
+    env:
+      WP_ENV_CORE: WordPress/WordPress#${{ matrix.wp }}
+    steps:
+      - uses: actions/checkout@v7
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - name: Set up PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          coverage: none
+          tools: composer:v2
+      - name: Install PHP dependencies
+        run: composer install --no-interaction --prefer-dist
+      - name: Install Node dependencies
+        run: npm ci
+      - name: Swap in the W3TC antagonist
+        if: matrix.antagonist == 'w3tc'
+        run: |
+          cat > .wp-env.override.json <<'JSON'
+          {
+            "env": {
+              "tests": {
+                "plugins": [
+                  "https://downloads.wordpress.org/plugin/wordfence.zip",
+                  "https://downloads.wordpress.org/plugin/w3-total-cache.zip"
+                ]
+              }
+            }
+          }
+          JSON
+      - name: Start wp-env
+        run: npm run env:start
+      - name: Run integration suite (live WP core)
+        run: npm run test:integration
+      - name: Route + antagonist HTTP smoke
+        run: bash bin/smoke-routes.sh
+      - name: Dump debug.log on failure
+        if: failure()
+        run: npx wp-env run tests-cli cat /var/www/html/wp-content/debug.log || true
+      - name: Stop wp-env
+        if: always()
+        run: npm run env:stop
+
+  plugin-check:
+    name: Plugin Check (WP.org gate)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      # Check exactly what ships: `make dist` applies .distignore, so the built
+      # tree has none of the repo's dev files (.git, wp-env/phpunit/phpcs config,
+      # bin/, tests/) that Plugin Check would otherwise reject as disallowed.
+      - name: Build the distributable plugin
+        run: make dist
+      - name: Run Plugin Check
+        uses: WordPress/plugin-check-action@v1.1.7
+        with:
+          slug: globetrotters-ai-presence
+          build-dir: build/globetrotters-ai-presence
+          # `plugin_updater` fires on the self-hosted `Update URI` header, which is
+          # our intentional distribution channel. Whether to drop it for
+          # WP.org-served updates is an open decision; until then it's excluded
+          # here, not a code defect.
+          exclude-checks: 'plugin_updater'
+
+  # Single required status check. Branch protection would otherwise have to list
+  # every matrix cell by name (and be edited whenever `php:` or `wp:` changes), so
+  # make THIS the required check: it always runs and passes only when every
+  # needed job (all cells of each matrix) succeeded or was skipped.
+  ci-ok:
+    if: ${{ always() }}
+    needs: [secrets, lint, test, integration, plugin-check]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify required jobs succeeded or were skipped
+        run: |
+          for r in ${{ join(needs.*.result, ' ') }}; do
+            if [[ "$r" != "success" && "$r" != "skipped" ]]; then
+              echo "Required job result: $r — failing."
+              exit 1
+            fi
+          done
+          echo "All required jobs passed or were correctly skipped."

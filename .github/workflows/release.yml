@@ -1,0 +1,67 @@
+name: Release
+
+# Tag-triggered release. Validates version consistency, runs the full CI gate,
+# builds the versioned zip + update.json, and cuts a GitHub Release for
+# provenance/rollback. Publishing to globetrotters.ai is a separate step:
+# `make release` stages the artefacts into the update channel's directory, then
+# a website deploy puts them live.
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  secrets:
+    uses: ./.github/workflows/secrets.yml
+
+  release:
+    name: Build & publish release artefacts
+    needs: secrets
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          coverage: none
+          tools: composer:v2
+
+      - name: Verify version consistency
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          HEADER=$(grep -iE '^[[:space:]]*\*[[:space:]]*Version:' globetrotters-ai-presence.php | head -1 | sed -E 's/.*Version:[[:space:]]*//' | tr -d '[:space:]')
+          CONST=$(grep -oE "const VERSION = '[^']+'" globetrotters-ai-presence.php | grep -oE "[0-9][^']*")
+          STABLE=$(grep -iE '^Stable tag:' readme.txt | head -1 | sed -E 's/.*Stable tag:[[:space:]]*//' | tr -d '[:space:]')
+          echo "tag=$VERSION header=$HEADER const=$CONST stable=$STABLE"
+          if [ "$VERSION" != "$HEADER" ] || [ "$VERSION" != "$CONST" ] || [ "$VERSION" != "$STABLE" ]; then
+            echo "::error::Version drift — tag=$VERSION header=$HEADER const=$CONST stable=$STABLE must all match."
+            exit 1
+          fi
+
+      - name: Install dependencies
+        run: composer install --no-interaction --prefer-dist
+
+      - name: Run checks (lint + tests)
+        run: make check
+
+      - name: Build release artefacts
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          make dist
+          cp build/globetrotters-ai-presence.zip "build/globetrotters-ai-presence-$VERSION.zip"
+          php bin/build-update-json.php "$VERSION" "build/globetrotters-ai-presence-$VERSION.zip" "https://globetrotters.ai/wp-plugin" > build/update.json
+          cat build/update.json
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v3
+        with:
+          files: |
+            build/globetrotters-ai-presence-*.zip
+            build/update.json
+          fail_on_unmatched_files: true

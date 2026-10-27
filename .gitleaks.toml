@@ -1,0 +1,19 @@
+# gitleaks configuration: the default rules, plus an allowlist for the fake
+# credentials the test suites use. Exact values only: never allowlist a path or
+# a rule wholesale.
+
+title = "gt-wordpress-plugin"
+
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Test fixtures: the fake IndexNow key (IndexNow keys are public by design) and fake ingest tokens"
+# Matched against the detected secret alone, anchored: a longer value that
+# merely contains a fixture token is still reported.
+regexTarget = "secret"
+regexes = [
+  '''^e715a2e7bf3c4a1d8e0b6f9c2d5a7e14$''',
+  '''^ingest-token-value$''',
+  '''^test-ingest-token-abcd$''',
+]

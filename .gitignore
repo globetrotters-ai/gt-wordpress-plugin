@@ -1,0 +1,16 @@
+/vendor/
+/build/
+/node_modules/
+/composer.lock
+.phpunit.result.cache
+.phpcs.cache
+.wp-env.override.json
+.DS_Store
+
+# Internal notes for local Claude Code sessions; never published.
+CLAUDE.local.md
+
+# Local, per-maintainer configuration.
+Makefile.local
+.entire/
+.claude/settings.json

@@ -1,0 +1,48 @@
+<?xml version="1.0"?>
+<ruleset name="Globetrotters AI Presence">
+	<description>Coding standards for the Globetrotters AI Presence WordPress plugin.</description>
+
+	<file>globetrotters-ai-presence.php</file>
+	<file>uninstall.php</file>
+	<file>src</file>
+
+	<arg name="extensions" value="php"/>
+	<arg name="colors"/>
+	<arg value="sp"/>
+
+	<!-- Target the plugin's minimum supported PHP. -->
+	<config name="testVersion" value="7.4-"/>
+	<config name="minimum_wp_version" value="6.0"/>
+
+	<rule ref="WordPress-Core">
+		<!-- The plugin autoloads via PSR-4 (StudlyCase files), not the core
+		     class-*.php convention. -->
+		<exclude name="WordPress.Files.FileName.NotHyphenatedLowercase"/>
+		<exclude name="WordPress.Files.FileName.InvalidClassFileName"/>
+	</rule>
+	<rule ref="WordPress-Docs">
+		<!-- Typed properties and dependency-injection constructors are
+		     self-documenting; keep every other doc sniff (param mismatches,
+		     ordering, short descriptions on documented members, etc.). -->
+		<exclude name="Squiz.Commenting.VariableComment.Missing"/>
+		<exclude name="Squiz.Commenting.FunctionComment.Missing"/>
+	</rule>
+	<rule ref="PHPCompatibilityWP"/>
+
+	<rule ref="WordPress.WP.I18n">
+		<properties>
+			<property name="text_domain" type="array">
+				<element value="globetrotters-ai-presence"/>
+			</property>
+		</properties>
+	</rule>
+
+	<rule ref="WordPress.NamingConventions.PrefixAllGlobals">
+		<properties>
+			<property name="prefixes" type="array">
+				<element value="gtaip"/>
+				<element value="Globetrotters\AiPresence"/>
+			</property>
+		</properties>
+	</rule>
+</ruleset>

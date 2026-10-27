@@ -1,0 +1,16 @@
+{
+	"name": "globetrotters-ai-presence",
+	"private": true,
+	"description": "Dev tooling (wp-env local + CI integration environment) for the Globetrotters AI Presence WordPress plugin. Not shipped in the plugin ZIP.",
+	"license": "GPL-2.0-or-later",
+	"scripts": {
+		"env:start": "wp-env start",
+		"env:stop": "wp-env stop",
+		"env:clean": "wp-env clean all",
+		"env:destroy": "wp-env destroy",
+		"test:integration": "wp-env run tests-cli --env-cwd=wp-content/plugins/globetrotters-ai-presence vendor/bin/phpunit -c phpunit-integration.xml.dist"
+	},
+	"devDependencies": {
+		"@wordpress/env": "^11.10.0"
+	}
+}

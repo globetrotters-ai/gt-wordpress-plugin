@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Report a security vulnerability
+    url: https://github.com/globetrotters-ai/gt-wordpress-plugin/blob/main/SECURITY.md
+    about: Please report security problems privately by email, never in a public issue.
+  - name: Globetrotters support
+    url: https://globetrotters.ai/contact
+    about: Questions about your account, Studio or your Official AI Presence.

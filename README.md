@@ -324,8 +324,11 @@ How it fits together:
   the site-capture gate whatever the UA, and when `Signature-Agent`,
   `Signature-Input` and `Signature` are all present the event — site or
   artefact — carries `"signature": {agent, input, value, authority}`: the
-  three headers as received (trimmed, quotes kept), plus the request `Host`,
-  each clipped at 1024 characters ([`RequestSignature`](src/Analytics/RequestSignature.php)).
+  three headers as received (trimmed, quotes kept), plus the request's
+  authority (the host lower-cased, `:port` only when not the scheme's
+  default, `X-Forwarded-Host`/`-Port`/`-Proto` honoured only from a trusted
+  proxy, exactly as the Symfony bundle sends it), each clipped at 1024
+  characters ([`RequestSignature`](src/Analytics/RequestSignature.php)).
   Nothing is verified here: the backend verifies at ingest, so a request never
   triggers a key fetch from the site. Buffered in the `signature` column
   (schema 5); before that column lands, the event is buffered without it.

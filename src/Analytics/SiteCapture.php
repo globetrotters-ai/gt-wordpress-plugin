@@ -156,7 +156,7 @@ final class SiteCapture {
 				self::content_length( $headers ),
 				$verdict['verified'],
 				$verdict['vendor']
-			) )->with_signature( RequestSignature::from_server( $server ) );
+			) )->with_signature( RequestSignature::from_server( $server, $this->options->trusted_proxies() ) );
 			if ( $this->buffer->append( $event ) ) {
 				$this->flushes->request_flush();
 			}

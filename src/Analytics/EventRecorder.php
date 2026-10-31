@@ -89,7 +89,8 @@ final class EventRecorder {
 	 * @param int    $bytes  Response body size in bytes.
 	 */
 	public function build( string $path, int $status, int $bytes ): Event {
-		$server = self::request_values();
+		$server  = self::request_values();
+		$trusted = $this->options->trusted_proxies();
 
 		return ( new Event(
 			wp_generate_uuid4(),
@@ -98,11 +99,11 @@ final class EventRecorder {
 			gmdate( 'Y-m-d\TH:i:s\Z' ),
 			$path,
 			$server['HTTP_USER_AGENT'] ?? '',
-			ClientIp::resolve( $server, $this->options->trusted_proxies() ),
+			ClientIp::resolve( $server, $trusted ),
 			$server['HTTP_REFERER'] ?? '',
 			$status,
 			$bytes
-		) )->with_signature( RequestSignature::from_server( $server ) );
+		) )->with_signature( RequestSignature::from_server( $server, $trusted ) );
 	}
 
 	/**

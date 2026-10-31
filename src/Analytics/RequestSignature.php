@@ -32,12 +32,23 @@ final class RequestSignature {
 	public const HOST_KEY  = 'HTTP_HOST';
 
 	/**
+	 * Symfony's host grammar (``Request::getHost()``): what is left after
+	 * removing every match must be empty.
+	 */
+	private const HOST_PATTERN = '/(?:^\[)?[a-zA-Z0-9-:\]_]+\.?/';
+
+	/**
+	 * ``X-Forwarded-Proto`` values Symfony reads as https.
+	 */
+	private const SECURE_PROTOS = array( 'https', 'on', 'ssl', '1' );
+
+	/**
 	 * The ``$_SERVER`` keys {@see from_server()} reads.
 	 *
 	 * @return string[]
 	 */
 	public static function server_keys(): array {
-		return array( self::AGENT_KEY, self::INPUT_KEY, self::VALUE_KEY, self::HOST_KEY );
+		return array( self::AGENT_KEY, self::INPUT_KEY, self::VALUE_KEY, self::HOST_KEY, 'HTTP_X_FORWARDED_HOST', 'HTTP_X_FORWARDED_PORT', 'HTTP_X_FORWARDED_PROTO', 'HTTPS', 'SERVER_NAME', 'SERVER_PORT', 'REMOTE_ADDR' );
 	}
 
 	/**
@@ -56,13 +67,14 @@ final class RequestSignature {
 	 *
 	 * ``agent``, ``input`` and ``value`` are the headers as received, trimmed
 	 * (quotes kept: the signature covers them byte for byte); ``authority`` is
-	 * the request's ``Host``, the RFC 9421 ``@authority`` component. Each is
+	 * the RFC 9421 ``@authority`` component, see {@see authority()}. Each is
 	 * clipped at {@see MAX_CHARS}. No IP.
 	 *
-	 * @param array<string, string> $server Request values (``$_SERVER`` keys).
+	 * @param array<string, string> $server  Request values (``$_SERVER`` keys).
+	 * @param TrustedProxies|null   $trusted The client-IP trusted proxies; null trusts none.
 	 * @return array{agent:string, input:string, value:string, authority:string}|null
 	 */
-	public static function from_server( array $server ): ?array {
+	public static function from_server( array $server, ?TrustedProxies $trusted = null ): ?array {
 		$agent = trim( (string) ( $server[ self::AGENT_KEY ] ?? '' ) );
 		$input = trim( (string) ( $server[ self::INPUT_KEY ] ?? '' ) );
 		$value = trim( (string) ( $server[ self::VALUE_KEY ] ?? '' ) );
@@ -73,8 +85,106 @@ final class RequestSignature {
 			'agent'     => self::clip( $agent ),
 			'input'     => self::clip( $input ),
 			'value'     => self::clip( $value ),
-			'authority' => self::clip( trim( (string) ( $server[ self::HOST_KEY ] ?? '' ) ) ),
+			'authority' => self::clip( self::authority( $server, $trusted ?? TrustedProxies::from( '', false ) ) ),
 		);
+	}
+
+	/**
+	 * The request's authority exactly as the Symfony bundle sends it
+	 * (``Request::getHttpHost()``): the host, lower-cased, plus ``:port`` only
+	 * when the port is not the scheme's default. ``X-Forwarded-Host``,
+	 * ``-Port`` and ``-Proto`` are read only when the connection came from a
+	 * proxy the client-IP rules trust ({@see ClientIp}); otherwise ``Host``.
+	 * A host outside Symfony's grammar falls back to the raw ``Host`` header,
+	 * trimmed and lower-cased.
+	 *
+	 * @param array<string, string> $server  Request values.
+	 * @param TrustedProxies        $trusted The client-IP trusted proxies.
+	 */
+	public static function authority( array $server, TrustedProxies $trusted ): string {
+		$peer      = self::value( $server, 'REMOTE_ADDR' );
+		$proxied   = '' !== $peer && $trusted->contains( $peer );
+		$raw       = self::value( $server, self::HOST_KEY );
+		$forwarded = $proxied ? self::first( $server, 'HTTP_X_FORWARDED_HOST' ) : '';
+
+		$source = '' !== $forwarded ? $forwarded : ( '' !== $raw ? $raw : self::value( $server, 'SERVER_NAME' ) );
+		$host   = strtolower( (string) preg_replace( '/:\d+$/', '', $source ) );
+		if ( '' === $host || '' !== preg_replace( self::HOST_PATTERN, '', $host ) ) {
+			return strtolower( $raw );
+		}
+
+		$https = self::is_https( $server, $proxied );
+		$port  = self::port( $server, $proxied, $forwarded, $raw, $https );
+		return null === $port || ( $https ? 443 : 80 ) === $port ? $host : $host . ':' . $port;
+	}
+
+	/**
+	 * Symfony's ``Request::isSecure()``: a trusted ``X-Forwarded-Proto`` decides
+	 * when one came, else the ``HTTPS`` server value.
+	 *
+	 * @param array<string, string> $server  Request values.
+	 * @param bool                  $proxied Whether the peer is a trusted proxy.
+	 */
+	private static function is_https( array $server, bool $proxied ): bool {
+		$proto = $proxied ? strtolower( self::first( $server, 'HTTP_X_FORWARDED_PROTO' ) ) : '';
+		if ( '' !== $proto ) {
+			return in_array( $proto, self::SECURE_PROTOS, true );
+		}
+		$https = strtolower( self::value( $server, 'HTTPS' ) );
+		return '' !== $https && 'off' !== $https;
+	}
+
+	/**
+	 * Symfony's ``Request::getPort()``: a trusted ``X-Forwarded-Port``, else the
+	 * port in the trusted forwarded host, else the ``Host`` header's, else the
+	 * scheme's default. Without a ``Host`` header, ``SERVER_PORT``.
+	 *
+	 * @param array<string, string> $server    Request values.
+	 * @param bool                  $proxied   Whether the peer is a trusted proxy.
+	 * @param string                $forwarded Trusted ``X-Forwarded-Host``, or ''.
+	 * @param string                $raw       ``Host`` header, or ''.
+	 * @param bool                  $https     Whether the request is secure.
+	 */
+	private static function port( array $server, bool $proxied, string $forwarded, string $raw, bool $https ): ?int {
+		$forwarded_port = $proxied ? self::first( $server, 'HTTP_X_FORWARDED_PORT' ) : '';
+		if ( '' !== $forwarded_port ) {
+			$candidate = ':' . $forwarded_port;
+		} elseif ( '' !== $forwarded ) {
+			$candidate = $forwarded;
+		} elseif ( '' !== $raw ) {
+			$candidate = $raw;
+		} else {
+			$server_port = self::value( $server, 'SERVER_PORT' );
+			return ctype_digit( $server_port ) ? (int) $server_port : null;
+		}
+
+		$bracket = strrpos( $candidate, ']' );
+		$colon   = '[' === $candidate[0] ? strpos( $candidate, ':', false === $bracket ? 0 : $bracket ) : strrpos( $candidate, ':' );
+		$port    = false === $colon ? '' : substr( $candidate, $colon + 1 );
+		if ( '' !== $port && '0' !== $port ) {
+			return (int) $port;
+		}
+		return $https ? 443 : 80;
+	}
+
+	/**
+	 * A request value, trimmed.
+	 *
+	 * @param array<string, string> $server Request values.
+	 * @param string                $key    ``$_SERVER`` key.
+	 */
+	private static function value( array $server, string $key ): string {
+		return trim( (string) ( $server[ $key ] ?? '' ) );
+	}
+
+	/**
+	 * The first entry of a comma-separated forwarding header, trimmed.
+	 *
+	 * @param array<string, string> $server Request values.
+	 * @param string                $key    ``$_SERVER`` key.
+	 */
+	private static function first( array $server, string $key ): string {
+		return trim( explode( ',', self::value( $server, $key ) )[0] );
 	}
 
 	/**

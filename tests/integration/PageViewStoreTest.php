@@ -48,6 +48,7 @@ final class PageViewStoreTest extends WP_UnitTestCase {
 		$this->assertTrue( Schema::page_view_platforms_ready() );
 		$this->assertTrue( Schema::signatures_ready() );
 		$this->assertSame( 'signature', $wpdb->get_var( 'SHOW COLUMNS FROM `' . Schema::table() . "` LIKE 'signature'" ) ); // phpcs:ignore
+		$this->assertSame( 'YES', $wpdb->get_var( 'SHOW COLUMNS FROM `' . Schema::table() . "` LIKE 'signature'", 2 ) ); // phpcs:ignore
 		$this->assertSame( 'varchar(48)', $wpdb->get_var( "SHOW COLUMNS FROM `{$table}` LIKE 'bucket'", 1 ) ); // phpcs:ignore
 		$this->assertTrue( Schema::is_ready() );
 		$this->assertSame(
@@ -207,6 +208,7 @@ final class PageViewStoreTest extends WP_UnitTestCase {
 			// Mid-upgrade: a signed event is still buffered, without the headers.
 			$this->assertGreaterThan( 0, ( new MysqlEventStore() )->append( $signed ) );
 			$this->assertSame( '1', $wpdb->get_var( "SELECT COUNT(*) FROM `{$events}` WHERE event_id = 'signed-after-upgrade'" ) ); // phpcs:ignore
+			$this->assertSame( (string) $signed->with_signature( null )->size_bytes(), $wpdb->get_var( "SELECT size_bytes FROM `{$events}` WHERE event_id = 'signed-after-upgrade'" ), 'Sized unsigned.' ); // phpcs:ignore
 			$wpdb->query( "DELETE FROM `{$events}` WHERE event_id = 'signed-after-upgrade'" ); // phpcs:ignore
 
 			( new Schema() )->ensure_installed();

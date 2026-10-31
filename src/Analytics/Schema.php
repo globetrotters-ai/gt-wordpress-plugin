@@ -197,7 +197,7 @@ final class Schema {
 			kind varchar(8) NOT NULL DEFAULT 'artefact',
 			verified tinyint(1) DEFAULT NULL,
 			vendor varchar(32) DEFAULT NULL,
-			signature text DEFAULT NULL,
+			signature text,
 			PRIMARY KEY  (id),
 			UNIQUE KEY event_id (event_id)
 		) {$collate};",

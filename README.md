@@ -318,6 +318,18 @@ How it fits together:
   included, to whatever `Location` a 3xx names. Per event: UUID, UTC
   timestamp, canonical path, User-Agent, client IP, referer, status, byte size.
   No cookies, no per-visitor identifiers.
+- **Signed requests** — ingest contract § "Signed requests (v7)". Some AI
+  agents (Meta's) send a stock browser User-Agent and sign the request with
+  Web Bot Auth (RFC 9421) instead. A non-empty `Signature-Agent` header passes
+  the site-capture gate whatever the UA, and when `Signature-Agent`,
+  `Signature-Input` and `Signature` are all present the event — site or
+  artefact — carries `"signature": {agent, input, value, authority}`: the
+  three headers as received (trimmed, quotes kept), plus the request `Host`,
+  each clipped at 1024 characters ([`RequestSignature`](src/Analytics/RequestSignature.php)).
+  Nothing is verified here: the backend verifies at ingest, so a request never
+  triggers a key fetch from the site. Buffered in the `signature` column
+  (schema 5); before that column lands, the event is buffered without it.
+  A page-view beacon carrying `Signature-Agent` counts as `ai_browser`.
 
 Inspecting a local install:
 

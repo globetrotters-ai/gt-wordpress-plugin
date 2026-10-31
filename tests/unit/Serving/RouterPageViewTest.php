@@ -305,6 +305,19 @@ final class RouterPageViewTest extends TestCase {
 		$this->assertSame( array(), $this->views->writes );
 	}
 
+	public function test_the_signature_agent_is_passed_and_moves_the_view_to_ai_browser(): void {
+		$_SERVER['HTTP_SIGNATURE_AGENT'] = '"https://www.meta.com"';
+		$router                          = $this->spy_router( '{"p":"/visiter"}' );
+
+		$router->maybe_serve();
+
+		$this->assertSame( array( 204 ), $router->statuses );
+		$this->assertSame(
+			array( array( 'increment', gmdate( 'Y-m-d' ), '/visiter', 'ai_browser' ) ),
+			$this->views->writes
+		);
+	}
+
 	public function test_sec_fetch_site_is_passed_for_a_no_referrer_page(): void {
 		// A Referrer-Policy: no-referrer page sends Origin: null and no Referer;
 		// the browser's own Sec-Fetch-Site is what proves it came from here.

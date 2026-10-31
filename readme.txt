@@ -4,7 +4,7 @@ Tags: ai, llms, schema, json-ld, discovery
 Requires at least: 6.0
 Tested up to: 7.1
 Requires PHP: 7.4
-Stable tag: 0.12.0
+Stable tag: 0.13.0
 License: GPL-2.0-or-later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -232,6 +232,19 @@ refused. Auto-updates can be turned on for it in the Plugins screen, same as
 usual.
 
 == Changelog ==
+
+= 0.13.0 =
+* New: AI agents that sign their requests (Web Bot Auth, server-log producer
+  contract v7) are counted on your pages even when they present an ordinary
+  browser User-Agent, as Meta's agent does. The plugin verifies nothing
+  itself: it forwards the request's `Signature-Agent`, `Signature-Input` and
+  `Signature` headers with each captured fetch, of your pages and of the AI
+  discovery files alike, and Globetrotters verifies them. No IP address is
+  added to page events.
+* New: with page-view counting on, a visit whose beacon carries a
+  `Signature-Agent` header counts as an AI browser, not as a person.
+* The reporting table gains one column on its next update; until it lands,
+  signed requests are reported without their signature.
 
 = 0.12.0 =
 * New: the AI crawlers named in your robots.txt now come with the daily list

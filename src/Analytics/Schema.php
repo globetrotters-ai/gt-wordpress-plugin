@@ -49,9 +49,10 @@ final class Schema {
 	 * 1: the event buffer. 2: adds the page-view counters. 3: site events in the
 	 * buffer (``kind``, ``verified``, ``vendor``; ``path`` widened to 512,
 	 * ``ip`` and ``bytes`` nullable). 4: the counters' ``bucket`` widened to 48,
-	 * to hold ``bucket@platform`` for a view referred by an AI answer.
+	 * to hold ``bucket@platform`` for a view referred by an AI answer. 5: the
+	 * buffer's ``signature``, a signed request's Web Bot Auth headers.
 	 */
-	public const VERSION        = 4;
+	public const VERSION        = 5;
 	public const VERSION_OPTION = 'gtaip_db_version';
 
 	/**
@@ -130,6 +131,14 @@ final class Schema {
 	}
 
 	/**
+	 * Whether the buffer can hold a signed request's headers (version 5
+	 * onwards). Before it an event is buffered without them.
+	 */
+	public static function signatures_ready(): bool {
+		return self::stored_version() >= 5;
+	}
+
+	/**
 	 * Whether the stored schema is the one this code installs.
 	 */
 	public static function is_current(): bool {
@@ -188,6 +197,7 @@ final class Schema {
 			kind varchar(8) NOT NULL DEFAULT 'artefact',
 			verified tinyint(1) DEFAULT NULL,
 			vendor varchar(32) DEFAULT NULL,
+			signature text DEFAULT NULL,
 			PRIMARY KEY  (id),
 			UNIQUE KEY event_id (event_id)
 		) {$collate};",
@@ -241,6 +251,11 @@ final class Schema {
 				// referred view must never be aimed at a column that truncates it.
 				if ( self::BUCKET_COLUMN_TYPE === $this->column_type( $views, 'bucket' ) ) {
 					$version = 4;
+					// Version 5 only once dbDelta() really added the column: a row
+					// is never aimed at a column that is not there.
+					if ( $this->column_exists( $events, 'signature' ) ) {
+						$version = 5;
+					}
 				}
 			}
 		}

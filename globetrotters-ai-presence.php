@@ -4,7 +4,7 @@
  * Plugin URI:        https://globetrotters.ai/
  * Update URI:        https://globetrotters.ai/wp-plugin
  * Description:        Installs the Official AI Presence at your site's apex — serves the AI discovery files (llms.txt, ai.json, .well-known/*) and injects server-rendered JSON-LD, pulling everything from Globetrotters so nothing has to be uploaded by hand.
- * Version:           0.12.0
+ * Version:           0.13.0
  * Requires at least: 6.0
  * Requires PHP:      7.4
  * Author:            Globetrotters
@@ -22,7 +22,7 @@ namespace Globetrotters\AiPresence;
 
 defined( 'ABSPATH' ) || exit;
 
-const VERSION = '0.12.0';
+const VERSION = '0.13.0';
 
 define( __NAMESPACE__ . '\PLUGIN_FILE', __FILE__ );
 define( __NAMESPACE__ . '\PLUGIN_DIR', plugin_dir_path( __FILE__ ) );

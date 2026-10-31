@@ -39,13 +39,15 @@ final class PageViewStoreTest extends WP_UnitTestCase {
 		parent::tear_down();
 	}
 
-	public function test_the_schema_installs_both_tables_at_version_4(): void {
+	public function test_the_schema_installs_both_tables_at_version_5(): void {
 		global $wpdb;
 		$table = Schema::page_views_table();
 
-		$this->assertSame( 4, Schema::VERSION );
+		$this->assertSame( 5, Schema::VERSION );
 		$this->assertTrue( Schema::site_events_ready() );
 		$this->assertTrue( Schema::page_view_platforms_ready() );
+		$this->assertTrue( Schema::signatures_ready() );
+		$this->assertSame( 'signature', $wpdb->get_var( 'SHOW COLUMNS FROM `' . Schema::table() . "` LIKE 'signature'" ) ); // phpcs:ignore
 		$this->assertSame( 'varchar(48)', $wpdb->get_var( "SHOW COLUMNS FROM `{$table}` LIKE 'bucket'", 1 ) ); // phpcs:ignore
 		$this->assertTrue( Schema::is_ready() );
 		$this->assertSame(
@@ -174,6 +176,51 @@ final class PageViewStoreTest extends WP_UnitTestCase {
 			$this->assertSame( 1, $this->views( $today, '/x', 'browser@perplexity' ) );
 		} finally {
 			$wpdb->query( "DELETE FROM `{$views}`" ); // phpcs:ignore
+			( new Schema() )->install();
+			add_filter( 'query', array( $this, '_create_temporary_tables' ) );
+			add_filter( 'query', array( $this, '_drop_temporary_tables' ) );
+		}
+	}
+
+	public function test_an_upgrade_from_version_4_adds_the_signature_column_and_keeps_the_buffer(): void {
+		global $wpdb;
+		$events = Schema::table();
+		$signed = ( new Event( 'signed-after-upgrade', '2026-10-31T10:00:00Z', '/llms.txt', 'Mozilla/5.0 Chrome/141', '', '', 200, 10 ) )->with_signature(
+			array(
+				'agent'     => '"https://www.meta.com"',
+				'input'     => 'sig1=("@authority" "signature-agent");tag="web-bot-auth"',
+				'value'     => 'sig1=:YWJj:',
+				'authority' => 'visit-acme.example',
+			)
+		);
+
+		// Same reason as the version-1 upgrade: work on the real table.
+		remove_filter( 'query', array( $this, '_create_temporary_tables' ) );
+		remove_filter( 'query', array( $this, '_drop_temporary_tables' ) );
+		try {
+			$wpdb->query( "ALTER TABLE `{$events}` DROP COLUMN signature" ); // phpcs:ignore
+			$wpdb->query( "DELETE FROM `{$events}`" ); // phpcs:ignore
+			$wpdb->query( "INSERT INTO `{$events}` (event_id, ts, path) VALUES ('keep-me-v4', '2026-10-31T09:00:00Z', '/llms.txt')" ); // phpcs:ignore
+			update_option( Schema::VERSION_OPTION, 4 );
+			$this->assertFalse( Schema::signatures_ready() );
+
+			// Mid-upgrade: a signed event is still buffered, without the headers.
+			$this->assertGreaterThan( 0, ( new MysqlEventStore() )->append( $signed ) );
+			$this->assertSame( '1', $wpdb->get_var( "SELECT COUNT(*) FROM `{$events}` WHERE event_id = 'signed-after-upgrade'" ) ); // phpcs:ignore
+			$wpdb->query( "DELETE FROM `{$events}` WHERE event_id = 'signed-after-upgrade'" ); // phpcs:ignore
+
+			( new Schema() )->ensure_installed();
+
+			$this->assertSame( Schema::VERSION, (int) get_option( Schema::VERSION_OPTION ) );
+			$this->assertTrue( Schema::signatures_ready() );
+			$this->assertSame( '1', $wpdb->get_var( "SELECT COUNT(*) FROM `{$events}` WHERE event_id = 'keep-me-v4'" ) ); // phpcs:ignore
+			$this->assertGreaterThan( 0, ( new MysqlEventStore() )->append( $signed ) );
+			$this->assertSame(
+				$signed->signature(),
+				json_decode( (string) $wpdb->get_var( "SELECT signature FROM `{$events}` WHERE event_id = 'signed-after-upgrade'" ), true ) // phpcs:ignore
+			);
+		} finally {
+			$wpdb->query( "DELETE FROM `{$events}`" ); // phpcs:ignore
 			( new Schema() )->install();
 			add_filter( 'query', array( $this, '_create_temporary_tables' ) );
 			add_filter( 'query', array( $this, '_drop_temporary_tables' ) );

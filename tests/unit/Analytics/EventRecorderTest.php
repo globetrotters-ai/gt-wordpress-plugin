@@ -106,6 +106,33 @@ final class EventRecorderTest extends TestCase {
 		$this->assertStringContainsString( 'ClaudeBot', $event->ua() );
 	}
 
+	public function test_a_signed_artefact_fetch_carries_the_signature_object(): void {
+		$_SERVER['HTTP_HOST']            = 'visit-acme.example';
+		$_SERVER['HTTP_SIGNATURE_AGENT'] = '"https://www.meta.com"';
+		$_SERVER['HTTP_SIGNATURE_INPUT'] = 'sig1=("@authority" "signature-agent");tag="web-bot-auth"';
+		$_SERVER['HTTP_SIGNATURE']       = ' sig1=:YWJj: ';
+
+		$payload = $this->recorder->build( '/llms.txt', 200, 10 )->to_payload();
+
+		$this->assertSame(
+			array(
+				'agent'     => '"https://www.meta.com"',
+				'input'     => 'sig1=("@authority" "signature-agent");tag="web-bot-auth"',
+				'value'     => 'sig1=:YWJj:',
+				'authority' => 'visit-acme.example',
+			),
+			$payload['signature']
+		);
+		$this->assertSame( '160.79.104.10', $payload['ip'], 'The artefact lane keeps its ip.' );
+	}
+
+	public function test_an_artefact_fetch_without_all_three_headers_has_no_signature(): void {
+		$_SERVER['HTTP_SIGNATURE_AGENT'] = '"https://www.meta.com"';
+		$_SERVER['HTTP_SIGNATURE']       = 'sig1=:YWJj:';
+
+		$this->assertArrayNotHasKey( 'signature', $this->recorder->build( '/llms.txt', 200, 10 )->to_payload() );
+	}
+
 	public function test_long_fields_are_clipped_to_the_contract_limit(): void {
 		$_SERVER['HTTP_USER_AGENT'] = str_repeat( 'a', 900 );
 

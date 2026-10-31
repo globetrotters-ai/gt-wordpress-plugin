@@ -165,6 +165,29 @@ final class ServerLogCaptureTest extends WP_UnitTestCase {
 		$this->assertMatchesRegularExpression( '/^[0-9a-f-]{36}$/', $event->id() );
 	}
 
+	public function test_a_signed_artefact_fetch_carries_its_signature_headers(): void {
+		$_SERVER['REQUEST_URI']          = '/llms.txt';
+		$_SERVER['HTTP_HOST']            = 'visit-acme.example';
+		$_SERVER['HTTP_SIGNATURE_AGENT'] = '"https://www.meta.com"';
+		$_SERVER['HTTP_SIGNATURE_INPUT'] = 'sig1=("@authority" "signature-agent");tag="web-bot-auth"';
+		$_SERVER['HTTP_SIGNATURE']       = 'sig1=:YWJj:';
+		try {
+			$this->router()->maybe_serve();
+
+			$this->assertSame(
+				array(
+					'agent'     => '"https://www.meta.com"',
+					'input'     => 'sig1=("@authority" "signature-agent");tag="web-bot-auth"',
+					'value'     => 'sig1=:YWJj:',
+					'authority' => 'visit-acme.example',
+				),
+				$this->store->oldest( 1 )[0]['event']->to_payload()['signature']
+			);
+		} finally {
+			unset( $_SERVER['HTTP_SIGNATURE_AGENT'], $_SERVER['HTTP_SIGNATURE_INPUT'], $_SERVER['HTTP_SIGNATURE'] );
+		}
+	}
+
 	public function test_proxy_headers_are_only_honoured_from_a_trusted_proxy(): void {
 		$_SERVER['REQUEST_URI']          = '/llms.txt';
 		$_SERVER['HTTP_X_FORWARDED_FOR'] = '198.51.100.99, 198.51.100.4';

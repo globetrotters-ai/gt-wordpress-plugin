@@ -59,6 +59,15 @@ final class MysqlEventStore implements EventStore {
 			// wpdb writes a PHP null as SQL NULL whatever its format.
 			$formats = array_merge( $formats, array( '%s', '%d', '%s' ) );
 		}
+		if ( array_key_exists( 'signature', $row ) ) {
+			// The last column, from schema 5. Before it the event is still worth
+			// buffering, without the headers: the backend counts it unsigned.
+			if ( Schema::signatures_ready() ) {
+				$formats[] = '%s';
+			} else {
+				unset( $row['signature'] );
+			}
+		}
 
 		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
 		$written = $wpdb->insert( Schema::table(), $row, $formats );

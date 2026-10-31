@@ -397,7 +397,8 @@ The wire contract is the Globetrotters server-log ingest contract,
   body ≤ 1 KB of `{"p": "<path>"}`, and a path the backend would accept (no
   `?` or `#`, starts with one `/`, ≤ 512 bytes, trailing slash folded). A UA
   with a bot marker, or none, is not counted; one naming ChatGPT, OAI, Comet,
-  Perplexity or Claude counts as `ai_browser`, anything else as `browser`. The
+  Perplexity or Claude, or a beacon carrying a `Signature-Agent` header,
+  counts as `ai_browser`, anything else as `browser`. The
   answer is always a bare `204` with `no-store` on both cache headers. It
   **never reads `REMOTE_ADDR` or a forwarding header, never stores the UA, and
   never sets a cookie**. With a persistent object cache, a path is capped at 120

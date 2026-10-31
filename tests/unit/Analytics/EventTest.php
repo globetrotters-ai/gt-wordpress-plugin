@@ -152,6 +152,14 @@ final class EventTest extends TestCase {
 		);
 	}
 
+	public function test_a_non_ascii_signature_is_never_under_sized(): void {
+		$signature          = self::signature();
+		$signature['input'] = 'sig1=("@authority");keyid="' . str_repeat( 'é', 300 ) . '"';
+		$event              = ( new Event( 'a', '2026-10-31T10:00:00Z', '/llms.txt', 'ua', '', '', 200, 10 ) )->with_signature( $signature );
+
+		$this->assertGreaterThanOrEqual( strlen( (string) json_encode( $event->to_payload() ) ), $event->size_bytes() );
+	}
+
 	public function test_a_row_without_a_kind_is_an_artefact_event(): void {
 		$event = Event::from_row(
 			array(

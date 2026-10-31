@@ -44,9 +44,9 @@ final class Event {
 	private const ENVELOPE_OVERHEAD_BYTES = 140;
 
 	/**
-	 * The ``signature`` object's key, member keys, quotes and braces.
+	 * The ``"signature":`` key and its separator.
 	 */
-	private const SIGNATURE_OVERHEAD_BYTES = 60;
+	private const SIGNATURE_OVERHEAD_BYTES = 16;
 
 	private string $id;
 	private string $ts;
@@ -269,9 +269,9 @@ final class Event {
 			+ strlen( $this->referer )
 			+ self::ENVELOPE_OVERHEAD_BYTES;
 		if ( null !== $this->signature ) {
-			// A quote, backslash or slash is escaped on the wire: one byte more each.
-			$joined  = implode( '', $this->signature );
-			$length += strlen( $joined ) + strlen( $joined ) - strlen( str_replace( array( '"', '\\', '/' ), '', $joined ) ) + self::SIGNATURE_OVERHEAD_BYTES;
+			// Encoded as the flush encodes it (slashes and non-ASCII escaped), so
+			// the estimate never under-reports. Four short strings: cheap.
+			$length += strlen( (string) json_encode( $this->signature, JSON_INVALID_UTF8_SUBSTITUTE ) ) + self::SIGNATURE_OVERHEAD_BYTES; // phpcs:ignore WordPress.WP.AlternativeFunctions.json_encode_json_encode
 		}
 
 		// The column is a SMALLINT; clipped fields keep a real row well under this,

@@ -30,6 +30,9 @@ final class SiteCaptureTest extends TestCase {
 	private const GPTBOT  = 'Mozilla/5.0 AppleWebKit/537.36 (KHTML, like Gecko); compatible; ChatGPT-User/1.0; +https://openai.com/bot';
 	private const BROWSER = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Safari/605.1.15';
 	private const HTML    = array( 'Content-Type: text/html; charset=UTF-8' );
+	private const AGENT   = '"https://www.meta.com"';
+	private const INPUT   = 'sig1=("@authority" "signature-agent");created=1793356800;expires=1793356860;keyid="k1";alg="ed25519";tag="web-bot-auth"';
+	private const VALUE   = 'sig1=:YWJjZGVm:';
 
 	private FakeEventStore $events;
 
@@ -78,6 +81,76 @@ final class SiteCaptureTest extends TestCase {
 	public function test_a_browser_visit_is_not_captured(): void {
 		$this->assertFalse( $this->capture( self::request( self::BROWSER, '/visiter' ) ) );
 		$this->assertSame( array(), $this->events->rows );
+	}
+
+	public function test_a_signed_request_with_a_browser_ua_is_captured_with_its_signature(): void {
+		$this->assertTrue( $this->capture( self::signed( self::request( self::BROWSER, '/visiter' ) ) ) );
+
+		$this->assertSame(
+			array(
+				'agent'     => self::AGENT,
+				'input'     => self::INPUT,
+				'value'     => self::VALUE,
+				'authority' => 'visit-acme.example',
+			),
+			$this->only_event()->to_payload()['signature']
+		);
+	}
+
+	public function test_an_empty_signature_agent_does_not_pass_the_gate(): void {
+		$server                         = self::signed( self::request( self::BROWSER, '/visiter' ) );
+		$server['HTTP_SIGNATURE_AGENT'] = '  ';
+
+		$this->assertFalse( $this->capture( $server ) );
+		$this->assertSame( array(), $this->events->rows );
+	}
+
+	/**
+	 * @dataProvider partial_signatures
+	 *
+	 * @param string $missing The header left out.
+	 */
+	public function test_partial_signature_headers_send_no_signature_object( string $missing ): void {
+		$server = self::signed( self::request( self::GPTBOT, '/visiter' ) );
+		unset( $server[ $missing ] );
+
+		$this->assertTrue( $this->capture( $server ) );
+
+		$this->assertArrayNotHasKey( 'signature', $this->only_event()->to_payload() );
+		$this->assertArrayNotHasKey( 'signature', $this->only_event()->to_row() );
+	}
+
+	/**
+	 * @return array<string, array{0:string}>
+	 */
+	public static function partial_signatures(): array {
+		return array(
+			'no Signature-Agent' => array( 'HTTP_SIGNATURE_AGENT' ),
+			'no Signature-Input' => array( 'HTTP_SIGNATURE_INPUT' ),
+			'no Signature'       => array( 'HTTP_SIGNATURE' ),
+		);
+	}
+
+	public function test_each_signature_member_is_trimmed_and_clipped_at_1024(): void {
+		$server                         = self::signed( self::request( self::BROWSER, '/visiter' ) );
+		$server['HTTP_SIGNATURE_AGENT'] = '  ' . self::AGENT . "\t";
+		$server['HTTP_SIGNATURE']       = 'sig1=:' . str_repeat( 'A', 2000 ) . ':';
+		$server['HTTP_HOST']            = str_repeat( 'h', 1500 );
+
+		$this->capture( $server );
+
+		$signature = $this->only_event()->signature();
+		$this->assertSame( self::AGENT, $signature['agent'] );
+		$this->assertSame( 1024, strlen( $signature['value'] ) );
+		$this->assertStringStartsWith( 'sig1=:AAA', $signature['value'] );
+		$this->assertSame( 1024, strlen( $signature['authority'] ) );
+		$this->assertSame( self::INPUT, $signature['input'] );
+	}
+
+	public function test_a_signed_event_carries_no_ip(): void {
+		$this->capture( self::signed( self::request( self::BROWSER, '/visiter' ) ) );
+
+		$this->assertStringNotContainsString( '20.171.206.7', (string) json_encode( $this->only_event()->to_payload() ) );
 	}
 
 	public function test_an_empty_or_non_browser_ua_is_captured(): void {
@@ -250,6 +323,21 @@ final class SiteCaptureTest extends TestCase {
 	private function only_event(): Event {
 		$this->assertCount( 1, $this->events->rows );
 		return array_values( $this->events->rows )[0];
+	}
+
+	/**
+	 * The request, signed with Web Bot Auth headers.
+	 *
+	 * @param array<string, string> $server Request values.
+	 * @return array<string, string>
+	 */
+	private static function signed( array $server ): array {
+		return $server + array(
+			'HTTP_HOST'            => 'visit-acme.example',
+			'HTTP_SIGNATURE_AGENT' => self::AGENT,
+			'HTTP_SIGNATURE_INPUT' => self::INPUT,
+			'HTTP_SIGNATURE'       => self::VALUE,
+		);
 	}
 
 	/**

@@ -138,6 +138,28 @@ final class FlushCycleTest extends WP_UnitTestCase {
 		update_option( Schema::VERSION_OPTION, Schema::VERSION );
 	}
 
+	public function test_a_signed_request_keeps_its_signature_from_buffer_to_wire_on_both_lanes(): void {
+		$signature = array(
+			'agent'     => '"https://www.meta.com"',
+			'input'     => 'sig1=("@authority" "signature-agent");created=1793356800;expires=1793356860;keyid="k1";alg="ed25519";tag="web-bot-auth"',
+			'value'     => 'sig1=:' . str_repeat( 'QUJD', 22 ) . ':',
+			'authority' => 'visit-acme.example',
+		);
+		$store     = new MysqlEventStore();
+		$store->append( ( new Event( wp_generate_uuid4(), gmdate( 'Y-m-d\TH:i:s\Z' ), '/llms.txt', 'Mozilla/5.0 Chrome/141', '160.79.104.10', '', 200, 4211 ) )->with_signature( $signature ) );
+		$store->append( Event::site( wp_generate_uuid4(), gmdate( 'Y-m-d\TH:i:s\Z' ), '/visiter', 'Mozilla/5.0 Chrome/141', 200, null, null, null )->with_signature( $signature ) );
+		$this->fill( 1 );
+		$transport = new FakeIngestTransport();
+
+		$this->assertTrue( $this->flusher( $transport )->run() );
+
+		$envelope = $transport->envelope();
+		$this->assertSame( $signature, $envelope['events'][0]['signature'] );
+		$this->assertSame( $signature, $envelope['siteEvents'][0]['signature'] );
+		$this->assertArrayNotHasKey( 'signature', $envelope['events'][1], 'An unsigned event carries no signature.' );
+		$this->assertArrayNotHasKey( 'ip', $envelope['siteEvents'][0] );
+	}
+
 	public function test_closed_days_are_sent_once_sealed_and_retried_under_the_same_ids(): void {
 		$store     = new MysqlPageViewStore();
 		$today     = gmdate( 'Y-m-d' );

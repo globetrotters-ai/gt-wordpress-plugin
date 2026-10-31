@@ -26,6 +26,8 @@ namespace Globetrotters\AiPresence\Analytics;
  *   with this site's and dropped.
  * - The User-Agent, matched against two coarse patterns and dropped. It is
  *   never stored: a counter row has no column for it.
+ * - Whether a ``Signature-Agent`` header came (contract v7), which moves a
+ *   browser view to ``ai_browser``. Never verified, never stored.
  * - The beacon's referral hints, ``r`` (the host of the page's referrer, when
  *   it is another site) and ``u`` (the page's ``utm_source``), matched by
  *   {@see AiReferrers} against the synced AI referrer list and dropped. Only
@@ -134,9 +136,10 @@ final class PageViewCounter {
 	 * @param string $referer        ``Referer`` request header, or ''.
 	 * @param string $ua             ``User-Agent`` request header, or ''.
 	 * @param string $body           Request body, already capped by the caller.
-	 * @param string $sec_fetch_site ``Sec-Fetch-Site`` request header, or ''.
+	 * @param string $sec_fetch_site  ``Sec-Fetch-Site`` request header, or ''.
+	 * @param string $signature_agent ``Signature-Agent`` request header, or ''.
 	 */
-	public function handle( string $origin, string $referer, string $ua, string $body, string $sec_fetch_site = '' ): bool {
+	public function handle( string $origin, string $referer, string $ua, string $body, string $sec_fetch_site = '', string $signature_agent = '' ): bool {
 		// Nothing to count into until the v2 counter table is there; agent
 		// traffic reporting is unaffected either way.
 		if ( ! Schema::page_views_ready() ) {
@@ -147,7 +150,7 @@ final class PageViewCounter {
 			return false;
 		}
 
-		$bucket = self::bucket( $ua );
+		$bucket = self::bucket( $ua, $signature_agent );
 		if ( null === $bucket ) {
 			return false;
 		}
@@ -292,13 +295,18 @@ final class PageViewCounter {
 	 * crawler that names an AI vendor (``ClaudeBot``, ``PerplexityBot``) is
 	 * never mistaken for an AI-driven browser.
 	 *
-	 * @param string $ua User-Agent header.
+	 * A beacon carrying ``Signature-Agent`` (contract v7) is an agent-driven
+	 * browser whatever its UA says: Meta Muse sends a stock Chrome one. As
+	 * coarse and unverified as the UA rule; the header is matched and dropped.
+	 *
+	 * @param string $ua              User-Agent header.
+	 * @param string $signature_agent ``Signature-Agent`` header, or ''.
 	 */
-	public static function bucket( string $ua ): ?string {
+	public static function bucket( string $ua, string $signature_agent = '' ): ?string {
 		if ( '' === trim( $ua ) || 1 === preg_match( self::BOT_MARKER, $ua ) ) {
 			return null;
 		}
-		return 1 === preg_match( self::AI_BROWSER_MARKER, $ua )
+		return RequestSignature::is_signed( $signature_agent ) || 1 === preg_match( self::AI_BROWSER_MARKER, $ua )
 			? self::BUCKET_AI_BROWSER
 			: self::BUCKET_BROWSER;
 	}

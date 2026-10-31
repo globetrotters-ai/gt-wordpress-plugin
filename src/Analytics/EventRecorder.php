@@ -89,20 +89,21 @@ final class EventRecorder {
 	 * @param int    $bytes  Response body size in bytes.
 	 */
 	public function build( string $path, int $status, int $bytes ): Event {
-		$server = self::request_values();
+		$server  = self::request_values();
+		$trusted = $this->options->trusted_proxies();
 
-		return new Event(
+		return ( new Event(
 			wp_generate_uuid4(),
 			// UTC with an explicit offset. See the class docblock — this is the
 			// single most likely thing to get silently wrong.
 			gmdate( 'Y-m-d\TH:i:s\Z' ),
 			$path,
 			$server['HTTP_USER_AGENT'] ?? '',
-			ClientIp::resolve( $server, $this->options->trusted_proxies() ),
+			ClientIp::resolve( $server, $trusted ),
 			$server['HTTP_REFERER'] ?? '',
 			$status,
 			$bytes
-		);
+		) )->with_signature( RequestSignature::from_server( $server, $trusted ) );
 	}
 
 	/**
@@ -114,7 +115,7 @@ final class EventRecorder {
 	 * @return array<string, string>
 	 */
 	private static function request_values(): array {
-		$keys   = array_merge( array( 'HTTP_USER_AGENT', 'HTTP_REFERER', 'HTTP_CF_CONNECTING_IP', 'HTTP_X_FORWARDED_FOR', 'REMOTE_ADDR' ), CaptureContext::server_keys() );
+		$keys   = array_merge( array( 'HTTP_USER_AGENT', 'HTTP_REFERER', 'HTTP_CF_CONNECTING_IP', 'HTTP_X_FORWARDED_FOR', 'REMOTE_ADDR' ), CaptureContext::server_keys(), RequestSignature::server_keys() );
 		$values = array();
 
 		foreach ( $keys as $key ) {

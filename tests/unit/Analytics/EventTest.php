@@ -88,6 +88,78 @@ final class EventTest extends TestCase {
 		$this->assertSame( array( 'id', 'ts', 'path', 'ua', 'status', 'bytes', 'verified', 'vendor' ), array_keys( $back->to_payload() ) );
 	}
 
+	/**
+	 * @dataProvider signed_events
+	 *
+	 * @param Event $event Event to sign.
+	 */
+	public function test_a_signature_round_trips_through_a_buffer_row_on_either_lane( Event $event ): void {
+		$signed = $event->with_signature( self::signature() );
+		$row    = $signed->to_row();
+
+		$this->assertSame( 'signature', array_key_last( $row ), 'The schema-5 column comes last.' );
+		$this->assertNull( $event->signature(), 'with_signature() returns a copy.' );
+		$this->assertSame( self::signature(), Event::from_row( $row )->to_payload()['signature'] );
+		$this->assertSame( $signed->to_payload(), Event::from_row( $row )->to_payload() );
+		$this->assertGreaterThanOrEqual( strlen( (string) json_encode( $signed->to_payload() ) ), $signed->size_bytes() );
+	}
+
+	/**
+	 * @return array<string, array{0:Event}>
+	 */
+	public static function signed_events(): array {
+		return array(
+			'artefact' => array( new Event( 'a', '2026-10-31T10:00:00Z', '/llms.txt', 'Mozilla/5.0', '160.79.104.10', '', 200, 10 ) ),
+			'site'     => array( Event::site( 's', '2026-10-31T10:00:00Z', '/a', 'Mozilla/5.0', 200, null, null, null ) ),
+		);
+	}
+
+	/**
+	 * @dataProvider unusable_signatures
+	 *
+	 * @param mixed $stored Stored column value.
+	 */
+	public function test_an_unusable_stored_signature_reads_as_none( $stored ): void {
+		$row = ( new Event( 'a', '2026-10-31T10:00:00Z', '/llms.txt', 'ua', '', '', 200, 10 ) )->to_row();
+
+		$row['signature'] = $stored;
+
+		$this->assertArrayNotHasKey( 'signature', Event::from_row( $row )->to_payload() );
+	}
+
+	/**
+	 * @return array<string, array{0:mixed}>
+	 */
+	public static function unusable_signatures(): array {
+		return array(
+			'null (schema 4 row)' => array( null ),
+			'not json'            => array( 'nope' ),
+			'missing member'      => array( '{"agent":"a","input":"i","value":"v"}' ),
+			'non-string member'   => array( '{"agent":"a","input":"i","value":1,"authority":"h"}' ),
+			'empty agent'         => array( '{"agent":"","input":"i","value":"v","authority":"h"}' ),
+		);
+	}
+
+	/**
+	 * @return array{agent:string, input:string, value:string, authority:string}
+	 */
+	private static function signature(): array {
+		return array(
+			'agent'     => '"https://www.meta.com"',
+			'input'     => 'sig1=("@authority" "signature-agent");tag="web-bot-auth"',
+			'value'     => 'sig1=:YWJj:',
+			'authority' => 'visit-acme.example',
+		);
+	}
+
+	public function test_a_non_ascii_signature_is_never_under_sized(): void {
+		$signature          = self::signature();
+		$signature['input'] = 'sig1=("@authority");keyid="' . str_repeat( 'é', 300 ) . '"';
+		$event              = ( new Event( 'a', '2026-10-31T10:00:00Z', '/llms.txt', 'ua', '', '', 200, 10 ) )->with_signature( $signature );
+
+		$this->assertGreaterThanOrEqual( strlen( (string) json_encode( $event->to_payload() ) ), $event->size_bytes() );
+	}
+
 	public function test_a_row_without_a_kind_is_an_artefact_event(): void {
 		$event = Event::from_row(
 			array(

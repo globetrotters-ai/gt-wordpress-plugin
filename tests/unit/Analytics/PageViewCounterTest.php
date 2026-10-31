@@ -265,6 +265,23 @@ final class PageViewCounterTest extends TestCase {
 		$this->assertSame( 'ai_browser', $this->store->writes[0][3] );
 	}
 
+	public function test_a_signed_beacon_with_a_stock_browser_ua_counts_as_an_ai_browser(): void {
+		$this->assertTrue( $this->counter()->handle( self::ORIGIN, '', self::BROWSER, '{"p":"/x","r":"chatgpt.com"}', '', '"https://www.meta.com"' ) );
+
+		$this->assertSame(
+			array( array( 'increment', gmdate( 'Y-m-d' ), '/x', 'ai_browser' ) ),
+			$this->store->writes,
+			'ai_browser, and so no referral platform.'
+		);
+	}
+
+	public function test_the_signature_agent_only_moves_a_counted_browser_view(): void {
+		$this->assertSame( 'ai_browser', PageViewCounter::bucket( self::BROWSER, '"https://www.meta.com"' ) );
+		$this->assertSame( 'browser', PageViewCounter::bucket( self::BROWSER, '   ' ), 'An empty header is no signature.' );
+		$this->assertNull( PageViewCounter::bucket( 'Meta-WebIndexer/1.1 (+https://developers.facebook.com/docs/sharing/webmasters/web-crawlers) bot', '"https://www.meta.com"' ), 'A bot stays uncounted.' );
+		$this->assertNull( PageViewCounter::bucket( '', '"https://www.meta.com"' ), 'So does an empty UA.' );
+	}
+
 	/**
 	 * @dataProvider rejected_provider
 	 */

@@ -48,6 +48,12 @@ final class MysqlEventStore implements EventStore {
 			return 0;
 		}
 
+		if ( null !== $event->signature() && ! Schema::signatures_ready() ) {
+			// The column arrives with schema 5. Before it the event is still worth
+			// buffering, unsigned (the backend counts it so), and sized unsigned:
+			// bytes never stored must not count against the buffer bound.
+			$event = $event->with_signature( null );
+		}
 		$row     = $event->to_row();
 		$formats = array( '%s', '%s', '%s', '%s', '%s', '%s', '%d', '%d', '%d' );
 		if ( $event->is_site() ) {
@@ -58,6 +64,10 @@ final class MysqlEventStore implements EventStore {
 			}
 			// wpdb writes a PHP null as SQL NULL whatever its format.
 			$formats = array_merge( $formats, array( '%s', '%d', '%s' ) );
+		}
+		if ( array_key_exists( 'signature', $row ) ) {
+			// The last column, from schema 5.
+			$formats[] = '%s';
 		}
 
 		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching

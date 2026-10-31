@@ -106,7 +106,7 @@ final class SiteCapture {
 			// The UA gate first: a human page load must cost a string match, not
 			// the request copy, headers_list() and the main-query conditionals.
 			$ua = isset( $_SERVER['HTTP_USER_AGENT'] ) && is_scalar( $_SERVER['HTTP_USER_AGENT'] ) ? (string) wp_unslash( $_SERVER['HTTP_USER_AGENT'] ) : ''; // phpcs:ignore WordPress.Security.ValidatedSanitizedInput.InputNotSanitized
-			if ( ! self::is_bot_ua( $ua ) ) {
+			if ( ! self::is_bot_ua( $ua ) && ! self::is_signed_request() ) {
 				return;
 			}
 			$code = http_response_code();
@@ -147,7 +147,7 @@ final class SiteCapture {
 
 			$this->context->record_markers( $server );
 			$verdict = $this->ranges->verify( ClientIp::resolve( $server, $this->options->trusted_proxies() ) );
-			$event   = Event::site(
+			$event   = ( Event::site(
 				wp_generate_uuid4(),
 				gmdate( 'Y-m-d\TH:i:s\Z' ),
 				$path,
@@ -156,7 +156,7 @@ final class SiteCapture {
 				self::content_length( $headers ),
 				$verdict['verified'],
 				$verdict['vendor']
-			);
+			) )->with_signature( RequestSignature::from_server( $server, $this->options->trusted_proxies() ) );
 			if ( $this->buffer->append( $event ) ) {
 				$this->flushes->request_flush();
 			}
@@ -169,7 +169,8 @@ final class SiteCapture {
 
 	/**
 	 * The request-level half of the gate. Returns the normalised path when the
-	 * request qualifies, null otherwise.
+	 * request qualifies, null otherwise. A bot UA or, since contract v7, a
+	 * non-empty ``Signature-Agent`` (a signed agent may send a browser UA).
 	 *
 	 * @param array<string, string> $server  Request values.
 	 * @param string[]              $headers Response header lines.
@@ -179,7 +180,7 @@ final class SiteCapture {
 		if ( 'GET' !== $method && 'HEAD' !== $method ) {
 			return null;
 		}
-		if ( ! self::is_bot_ua( $server['HTTP_USER_AGENT'] ?? '' ) ) {
+		if ( ! self::is_bot_ua( $server['HTTP_USER_AGENT'] ?? '' ) && ! RequestSignature::is_signed( $server[ RequestSignature::AGENT_KEY ] ?? '' ) ) {
 			return null;
 		}
 		$path = self::normalise_path( $server['REQUEST_URI'] ?? '' );
@@ -197,6 +198,15 @@ final class SiteCapture {
 	 */
 	public static function is_bot_ua( string $ua ): bool {
 		return 1 === preg_match( self::BOT_MARKER, $ua ) || false === strpos( $ua, 'Mozilla/' );
+	}
+
+	/**
+	 * Whether the current request carries a ``Signature-Agent`` (contract v7):
+	 * a signed agent may send a stock browser User-Agent. Read straight from
+	 * ``$_SERVER``, before any copy, like the UA.
+	 */
+	private static function is_signed_request(): bool {
+		return isset( $_SERVER[ RequestSignature::AGENT_KEY ] ) && is_scalar( $_SERVER[ RequestSignature::AGENT_KEY ] ) && RequestSignature::is_signed( (string) $_SERVER[ RequestSignature::AGENT_KEY ] ); // phpcs:ignore WordPress.Security.ValidatedSanitizedInput.InputNotSanitized, WordPress.Security.ValidatedSanitizedInput.MissingUnslash
 	}
 
 	/**
@@ -294,7 +304,7 @@ final class SiteCapture {
 	 * @return array<string, string>
 	 */
 	private static function request_values(): array {
-		$keys   = array_merge( array( 'REQUEST_METHOD', 'REQUEST_URI', 'HTTP_USER_AGENT', 'HTTP_CF_CONNECTING_IP', 'HTTP_X_FORWARDED_FOR', 'REMOTE_ADDR' ), CaptureContext::server_keys() );
+		$keys   = array_merge( array( 'REQUEST_METHOD', 'REQUEST_URI', 'HTTP_USER_AGENT', 'HTTP_CF_CONNECTING_IP', 'HTTP_X_FORWARDED_FOR', 'REMOTE_ADDR' ), CaptureContext::server_keys(), RequestSignature::server_keys() );
 		$values = array();
 		foreach ( $keys as $key ) {
 			if ( isset( $_SERVER[ $key ] ) && is_scalar( $_SERVER[ $key ] ) ) {

@@ -43,6 +43,11 @@ final class Event {
 	 */
 	private const ENVELOPE_OVERHEAD_BYTES = 140;
 
+	/**
+	 * The ``"signature":`` key and its separator.
+	 */
+	private const SIGNATURE_OVERHEAD_BYTES = 16;
+
 	private string $id;
 	private string $ts;
 	private string $path;
@@ -55,6 +60,13 @@ final class Event {
 	private ?bool $verified   = null;
 	private ?string $vendor   = null;
 	private bool $bytes_known = true;
+
+	/**
+	 * The request's Web Bot Auth headers (contract v7), unverified.
+	 *
+	 * @var array{agent:string, input:string, value:string, authority:string}|null
+	 */
+	private ?array $signature = null;
 
 	public function __construct(
 		string $id,
@@ -98,12 +110,26 @@ final class Event {
 	}
 
 	/**
+	 * This event carrying a request's signature headers, as
+	 * {@see RequestSignature::from_server()} built them (null: none).
+	 *
+	 * @param array{agent:string, input:string, value:string, authority:string}|null $signature Signature.
+	 */
+	public function with_signature( ?array $signature ): self {
+		$event            = clone $this;
+		$event->signature = $signature;
+		return $event;
+	}
+
+	/**
 	 * Rebuild an event from a buffer row.
 	 *
 	 * @param array<string, mixed> $row Row as read from the buffer table.
 	 */
 	public static function from_row( array $row ): self {
 		// Rows buffered before schema 3 carry no kind: they are artefact events.
+		// Rows buffered before schema 5 carry no signature.
+		$signature = RequestSignature::from_stored( $row['signature'] ?? null );
 		if ( self::KIND_SITE === ( $row['kind'] ?? null ) ) {
 			$verified = $row['verified'] ?? null;
 			return self::site(
@@ -115,9 +141,9 @@ final class Event {
 				null === ( $row['bytes'] ?? null ) ? null : (int) $row['bytes'],
 				null === $verified ? null : (bool) (int) $verified,
 				isset( $row['vendor'] ) ? (string) $row['vendor'] : null
-			);
+			)->with_signature( $signature );
 		}
-		return new self(
+		return ( new self(
 			(string) ( $row['event_id'] ?? '' ),
 			(string) ( $row['ts'] ?? '' ),
 			(string) ( $row['path'] ?? '' ),
@@ -126,15 +152,31 @@ final class Event {
 			(string) ( $row['referer'] ?? '' ),
 			(int) ( $row['status'] ?? 0 ),
 			(int) ( $row['bytes'] ?? 0 )
-		);
+		) )->with_signature( $signature );
 	}
 
 	/**
 	 * Column map for an INSERT into the buffer table.
 	 *
+	 * ``signature`` is the last key, and present only when the event carries
+	 * one: the buffer has that column only from schema 5.
+	 *
 	 * @return array<string, mixed>
 	 */
 	public function to_row(): array {
+		$row = $this->base_row();
+		if ( null !== $this->signature ) {
+			$row['signature'] = RequestSignature::to_stored( $this->signature );
+		}
+		return $row;
+	}
+
+	/**
+	 * The columns every buffer schema since 3 has.
+	 *
+	 * @return array<string, mixed>
+	 */
+	private function base_row(): array {
 		if ( self::KIND_SITE === $this->kind ) {
 			return array(
 				'event_id'   => $this->id,
@@ -173,6 +215,20 @@ final class Event {
 	 * @return array<string, mixed>
 	 */
 	public function to_payload(): array {
+		$payload = $this->base_payload();
+		if ( null !== $this->signature ) {
+			// Contract v7: on either lane, only when all three headers came.
+			$payload['signature'] = $this->signature;
+		}
+		return $payload;
+	}
+
+	/**
+	 * The wire fields every event carries.
+	 *
+	 * @return array<string, mixed>
+	 */
+	private function base_payload(): array {
 		if ( self::KIND_SITE === $this->kind ) {
 			// Contract section 1: no ip key, ever.
 			return array(
@@ -212,6 +268,11 @@ final class Event {
 			+ strlen( $this->ip )
 			+ strlen( $this->referer )
 			+ self::ENVELOPE_OVERHEAD_BYTES;
+		if ( null !== $this->signature ) {
+			// Encoded as the flush encodes it (slashes and non-ASCII escaped), so
+			// the estimate never under-reports. Four short strings: cheap.
+			$length += strlen( (string) json_encode( $this->signature, JSON_INVALID_UTF8_SUBSTITUTE ) ) + self::SIGNATURE_OVERHEAD_BYTES; // phpcs:ignore WordPress.WP.AlternativeFunctions.json_encode_json_encode
+		}
 
 		// The column is a SMALLINT; clipped fields keep a real row well under this,
 		// and saturating is safer than overflowing the bound accounting.
@@ -264,6 +325,15 @@ final class Event {
 
 	public function vendor(): ?string {
 		return $this->vendor;
+	}
+
+	/**
+	 * The signature headers this event forwards, or null.
+	 *
+	 * @return array{agent:string, input:string, value:string, authority:string}|null
+	 */
+	public function signature(): ?array {
+		return $this->signature;
 	}
 
 	/**

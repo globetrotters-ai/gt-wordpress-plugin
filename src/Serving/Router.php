@@ -11,6 +11,7 @@ namespace Globetrotters\AiPresence\Serving;
 
 use Globetrotters\AiPresence\Analytics\EventRecorder;
 use Globetrotters\AiPresence\Analytics\PageViewCounter;
+use Globetrotters\AiPresence\Analytics\RequestSignature;
 use Globetrotters\AiPresence\Analytics\SiteCapture;
 use Globetrotters\AiPresence\Cache\ArtefactCache;
 use Globetrotters\AiPresence\Settings\Options;
@@ -290,7 +291,8 @@ class Router {
 			self::header( 'HTTP_REFERER' ),
 			self::header( 'HTTP_USER_AGENT' ),
 			$body,
-			self::header( 'HTTP_SEC_FETCH_SITE' )
+			self::header( 'HTTP_SEC_FETCH_SITE' ),
+			self::header( RequestSignature::AGENT_KEY )
 		);
 
 		$this->emit_status( 204, self::page_view_response_headers() );
